@@ -1,0 +1,136 @@
+#include "AFMotor_R4.h"
+#include <Servo.h>
+#include <NewPing.h>
+#define TRIG_PIN          A1
+#define ECHO_PIN          A2
+#define IR_PIN            A0
+#define IR_PIN2           A3
+#define MAX_DISTANCE      200
+#define OBSTACLE_DIST     25
+#define SAFE_DIST         35
+#define MOTOR_SPEED       125
+#define TURN_SPEED        90   
+#define SERVO_CENTER      90
+#define SERVO_MIN         40
+#define SERVO_MAX         140
+#define SCAN_DELAY        400
+#define IR_OBSTACLE_TIME  80
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
+AF_DCMotor motorLeft(1);
+AF_DCMotor motorRight(2);
+Servo scanServo;
+int  servoAngle    = SERVO_CENTER;
+bool obstacleAhead = false;
+bool irBlocked     = false;
+void moveForward() {
+  motorLeft.setSpeed(MOTOR_SPEED);
+  motorRight.setSpeed(MOTOR_SPEED);
+  motorLeft.run(FORWARD);
+  motorRight.run(FORWARD);
+}
+void moveBackward() {
+  motorLeft.setSpeed(MOTOR_SPEED);
+  motorRight.setSpeed(MOTOR_SPEED);
+  motorLeft.run(BACKWARD);
+  motorRight.run(BACKWARD);
+}
+void turnLeft() {
+  motorLeft.setSpeed(TURN_SPEED);
+  motorRight.setSpeed(TURN_SPEED);
+  motorLeft.run(BACKWARD);
+  motorRight.run(FORWARD);
+}
+void turnRight() {
+  motorLeft.setSpeed(TURN_SPEED);
+  motorRight.setSpeed(TURN_SPEED);
+  motorLeft.run(FORWARD);
+  motorRight.run(BACKWARD);
+}
+void stopMotors() {
+  motorLeft.run(RELEASE);
+  motorRight.run(RELEASE);
+}
+void servoWrite(int angle) {
+  angle = constrain(angle, SERVO_MIN, SERVO_MAX);
+  scanServo.write(angle);
+  servoAngle = angle;
+}
+int measureDistance() {
+  delay(30);
+  unsigned int dist = sonar.ping_cm();
+  return (dist == 0) ? MAX_DISTANCE : dist;
+}
+int chooseBestDirection() {
+  servoWrite(SERVO_MIN + 5);
+  delay(SCAN_DELAY);
+  int distRight = measureDistance();
+  servoWrite(SERVO_CENTER);
+  delay(SCAN_DELAY);
+  int distCenter = measureDistance();
+  servoWrite(SERVO_MAX - 5);
+  delay(SCAN_DELAY);
+  int distLeft = measureDistance();
+  servoWrite(SERVO_CENTER);
+  delay(200);
+  Serial.print("L:"); Serial.print(distLeft);
+  Serial.print("  C:"); Serial.print(distCenter);
+  Serial.print("  R:"); Serial.println(distRight);
+  if (distLeft >= distRight && distLeft >= distCenter) return -1;
+  if (distRight >= distLeft && distRight >= distCenter) return  1;
+  return 0;
+}
+bool irObstacleDetected() {
+  if (digitalRead(IR_PIN) == LOW || digitalRead(IR_PIN2) == LOW) {
+    delay(IR_OBSTACLE_TIME);
+    if (digitalRead(IR_PIN) == LOW || digitalRead(IR_PIN2) == LOW) {
+      Serial.println("IR: OBSTACLE");
+      return true;
+    }
+  }
+  return false;
+}
+void setup() {
+  Serial.begin(9600);
+  pinMode(IR_PIN,  INPUT);
+  pinMode(IR_PIN2, INPUT);
+  scanServo.attach(10);
+  servoWrite(SERVO_CENTER);
+  delay(500);
+  motorLeft.setSpeed(0);
+  motorRight.setSpeed(0);
+  motorLeft.run(RELEASE);
+  motorRight.run(RELEASE);
+  delay(1000);
+}
+void loop() {
+  int frontDist = measureDistance();
+  Serial.print("Front dist: "); Serial.print(frontDist); Serial.println(" cm");
+  obstacleAhead = (frontDist > 0 && frontDist <= OBSTACLE_DIST);
+  irBlocked     = irObstacleDetected();
+  bool blocked  = obstacleAhead || irBlocked;
+  if (!blocked) {
+    moveForward();
+  } else {
+    stopMotors();
+    delay(100);
+    moveBackward();
+    delay(450);        
+    stopMotors();
+    delay(50);
+    int direction = chooseBestDirection();
+    if (direction == -1) {
+      turnLeft();
+      delay(650);       
+    } else if (direction == 1) {
+      turnRight();
+      delay(650);        
+    } else {
+      moveBackward();
+      delay(500);
+      turnRight();
+      delay(850);        
+    }
+    stopMotors();
+    delay(100);
+  }
+}
